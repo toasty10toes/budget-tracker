@@ -455,7 +455,7 @@
 
   // drag the curtain (or its tab)
   (function() {
-    let startX = 0, startY = 0, base = 0, dragging = false, decided = false, horiz = false, dx = 0, w = 1;
+    let startX = 0, startY = 0, base = 0, dragging = false, decided = false, horiz = false, dx = 0, w = 1, lastTap = 0;
     const onStart = ev => {
       startX = ev.touches[0].clientX; startY = ev.touches[0].clientY; dx = 0;
       w = curtain.clientWidth; base = curtainOpen ? w : 0;
@@ -474,7 +474,12 @@
     };
     const onEnd = () => {
       if (!dragging) return; dragging = false; curtain.classList.remove('dragging');
-      if (!horiz) { setPrivate(curtainOpen); return; }
+      if (!decided) {                       // a tap: toggle only on a double tap, so a scroll that starts here does nothing
+        const now = Date.now();
+        if (now - lastTap < 350) { lastTap = 0; setPrivate(curtainOpen); } else lastTap = now;
+        return;
+      }
+      if (!horiz) return;                   // vertical scroll: leave the curtain alone
       const x = Math.max(0, Math.min(w, base + dx));
       setPrivate(x < w * 0.5);
     };
