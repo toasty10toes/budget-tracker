@@ -31,7 +31,7 @@
   }
   header {
     padding: 18px 16px 14px; position: sticky; top: 0; background: var(--bg);
-    z-index: 10; border-bottom: 1px solid var(--border); text-align: center;
+    z-index: 30; border-bottom: 1px solid var(--border); text-align: center; /* above the curtain and its tab (20/21) */
   }
   h1 { font-size: 17px; margin: 0 0 4px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
   .month-label {
@@ -93,10 +93,7 @@
   .cat-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .cat-name { font-weight: 600; font-size: 15px; display:flex; align-items:center; gap:8px; }
   .cat-name .cat-dot { width: 10px; height: 10px; }
-  .cat-amounts { text-align: right; font-size: 13px; color: var(--text-dim); }
-  .cat-remaining { font-size: 15px; font-weight: 700; margin-top: 4px; }
-  .cat-bar-track { height: 6px; background: var(--border); border-radius: 4px; margin-top: 10px; overflow: hidden; }
-  .cat-bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+  .cat-budget { font-size: 15px; font-weight: 700; }
 
   .empty-state { text-align: center; color: var(--text-dim); padding: 24px 10px; font-size: 14px; }
 
@@ -494,13 +491,7 @@
   })();
 
   // ---------- Rendering ----------
-  function renderCategoryCard(cat, spent) {
-    const remaining = cat.budget - spent;
-    const pct = cat.budget > 0 ? Math.min(100, (spent / cat.budget) * 100) : 0;
-    let barColor = cat.color, remColor = 'var(--text)';
-    if (remaining < 0) { barColor = 'var(--danger)'; remColor = 'var(--danger)'; }
-    else if (pct > 85) { barColor = 'var(--warn)'; remColor = 'var(--warn)'; }
-
+  function renderCategoryCard(cat) {
     const wrap = document.createElement('div');
     wrap.className = 'swipe-wrap';
     wrap.innerHTML = `
@@ -508,10 +499,8 @@
       <div class="cat-card" data-swipe-target>
         <div class="cat-top">
           <div class="cat-name"><span class="cat-dot" style="background:${cat.color}"></span>${escapeHtml(cat.name)}</div>
-          <div class="cat-amounts">${fmt(spent)} of ${fmt(cat.budget)}</div>
+          <div class="cat-budget">${fmt(cat.budget)}</div>
         </div>
-        <div class="cat-remaining" style="color:${remColor}">${fmt(remaining)}</div>
-        <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%; background:${barColor}"></div></div>
       </div>`;
     const card = wrap.querySelector('[data-swipe-target]');
     attachSwipe(card, () => {
@@ -564,8 +553,8 @@
     document.getElementById('noNecessities').style.display = necessities.length ? 'none' : 'block';
     document.getElementById('noSavings').style.display = savings.length ? 'none' : 'block';
     let necessitiesBudget = 0, savingsBudget = 0;
-    necessities.forEach(cat => { necessitiesBudget += cat.budget; nl.appendChild(renderCategoryCard(cat, spentFor(cat))); });
-    savings.forEach(cat => { savingsBudget += cat.budget; sl.appendChild(renderCategoryCard(cat, spentFor(cat))); });
+    necessities.forEach(cat => { necessitiesBudget += cat.budget; nl.appendChild(renderCategoryCard(cat)); });
+    savings.forEach(cat => { savingsBudget += cat.budget; sl.appendChild(renderCategoryCard(cat)); });
 
     // Plan summary
     const afterNec = income - necessitiesBudget;
