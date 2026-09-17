@@ -113,25 +113,15 @@
     position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%);
     width: 232px; height: 84px; z-index: 60; cursor: pointer; -webkit-user-select: none; user-select: none;
   }
-  .fab-digits {
-    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-    font-size: 10px; line-height: 12px;
-    color: var(--accent); white-space: pre; letter-spacing: .5px; text-align: center;
-    -webkit-mask-image: radial-gradient(ellipse 50% 50% at center, transparent 40%, #000 62%, transparent 100%);
-    mask-image: radial-gradient(ellipse 50% 50% at center, transparent 40%, #000 62%, transparent 100%);
-    opacity: .9;
-  }
-  .fab-core {
-    position: absolute; left: 24px; right: 24px; top: 14px; bottom: 14px; border-radius: 30px;
-    background: var(--accent);
-    -webkit-mask-image: radial-gradient(ellipse 60% 62% at center, #000 55%, transparent 100%);
-    mask-image: radial-gradient(ellipse 60% 62% at center, #000 55%, transparent 100%);
-  }
+  .fab-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
+    transition: transform .18s cubic-bezier(.2,.8,.2,1), filter .18s ease; }
   .fab-label {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: white; font-size: 15px; font-weight: 700; pointer-events: none; text-shadow: 0 1px 6px rgba(0,0,0,.25);
+    color: white; font-size: 15px; font-weight: 700; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.25);
+    transition: transform .18s cubic-bezier(.2,.8,.2,1);
   }
-  .fab-wrap:active .fab-core { filter: brightness(.9); }
+  .fab-wrap:active .fab-canvas { transform: scale(.96); filter: brightness(.92); }
+  .fab-wrap:active .fab-label { transform: scale(.96); }
 
   /* clock flicker */
   .clk { display: inline-block; transition: color 1.2s ease; }
@@ -163,9 +153,18 @@
   #privateZone.open #curtainTab { display: flex; }
   #curtainTab::after { content: "⋮"; }
   /* Modals */
-  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: flex-end; justify-content: center; }
-  .modal-overlay.open { display: flex; }
-  .modal { background: var(--card); width: 100%; max-width: 560px; border-radius: 18px 18px 0 0; padding: 20px 20px 28px; max-height: 85vh; overflow-y: auto; position: relative; }
+  .modal-overlay {
+    display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: flex-end; justify-content: center;
+    opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s;
+  }
+  .modal-overlay.open { opacity: 1; visibility: visible; transition: opacity .25s ease; }
+  .modal {
+    background: var(--card); width: 100%; max-width: 560px; border-radius: 18px 18px 0 0;
+    padding: 20px 20px calc(28px + env(safe-area-inset-bottom, 0px)); max-height: 85vh; overflow-y: auto; position: relative;
+    transform: translateY(100%); transition: transform .32s cubic-bezier(.2,.8,.2,1);
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { .modal-overlay, .modal { transition: none; } }
   .modal h2 { margin: 0 0 16px; font-size: 17px; }
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12.5px; color: var(--text-dim); margin-bottom: 5px; }
@@ -233,8 +232,7 @@
 </main>
 
 <div class="fab-wrap" id="addExpenseBtn">
-  <div class="fab-digits" id="fabDigits"></div>
-  <div class="fab-core"></div>
+  <canvas class="fab-canvas" id="fabCanvas"></canvas>
   <div class="fab-label">+ Add expense</div>
 </div>
 
@@ -475,7 +473,7 @@
     };
     const onEnd = () => {
       if (!dragging) return; dragging = false; curtain.classList.remove('dragging');
-      if (!horiz) { setPrivate(!curtainOpen); return; }
+      if (!horiz) { setPrivate(curtainOpen); return; }
       const x = Math.max(0, Math.min(w, base + dx));
       setPrivate(x < w * 0.5);
     };
@@ -485,6 +483,7 @@
       el.addEventListener('touchmove', onMove, { passive: false });
       el.addEventListener('touchend', onEnd);
       el.addEventListener('touchcancel', onEnd);
+      el.addEventListener('dblclick', () => setPrivate(curtainOpen)); // desktop: toggle with a double click
     });
   })();
 
@@ -505,7 +504,7 @@
           <div class="cat-name"><span class="cat-dot" style="background:${cat.color}"></span>${escapeHtml(cat.name)}</div>
           <div class="cat-amounts">${fmt(spent)} of ${fmt(cat.budget)}</div>
         </div>
-        <div class="cat-remaining" style="color:${remColor}">${fmt(remaining)} left</div>
+        <div class="cat-remaining" style="color:${remColor}">${fmt(remaining)}</div>
         <div class="cat-bar-track"><div class="cat-bar-fill" style="width:${pct}%; background:${barColor}"></div></div>
       </div>`;
     const card = wrap.querySelector('[data-swipe-target]');
@@ -662,19 +661,71 @@
   }
   tickClock(); setInterval(tickClock, 1000);
 
-  // crumbling digits around the add button
-  const fabDigits = document.getElementById('fabDigits');
-  let fabPos = 0;
-  function fabTick() {
-    let out = '';
-    for (let r = 0; r < 7; r++) {
-      const s = GENESIS_RAW.slice(fabPos, fabPos + 34) + GENESIS_RAW.slice(0, Math.max(0, fabPos + 34 - GENESIS_RAW.length));
-      fabPos = (fabPos + 34 + Math.floor(Math.random() * 3)) % GENESIS_RAW.length;
-      out += s + '\n';
+  // add button: no pill, just genesis hex. Dense enough in the middle to read as solid,
+  // thinning out with distance from a pill-shaped core so the edge is a density gradient.
+  (function() {
+    const cv = document.getElementById('fabCanvas'), fc = cv.getContext('2d');
+    const PX = 2.6, PY = 3, FONT = 7;          // glyph pitch is tighter than the glyphs, so the core overlaps into a solid
+    const CORE_W = 90, CORE_H = 19, FADE = 26;   // half-size of the solid core, and how far the falloff runs
+    const GW = 5, GH = 8;                        // drawn glyph box
+    let W = 0, H = 0, cols = 0, rows = 0, color = '#2563eb', last = 0, running = false, atlas = [];
+    const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+    function density(x, y) {
+      const dx = Math.max(Math.abs(x - W / 2) - (CORE_W - CORE_H), 0), dy = Math.abs(y - H / 2);
+      const d = Math.hypot(dx, dy) - CORE_H;       // signed distance to the rounded core
+      if (d <= 0) return 1;
+      const t = 1 - d / FADE;
+      return t <= 0 ? 0 : t * t;                   // ease-in so the edge dissolves gently
     }
-    fabDigits.textContent = out;
-  }
-  fabTick(); setInterval(fabTick, 220);
+    function size() {
+      const dpr = window.devicePixelRatio || 1;
+      W = cv.clientWidth; H = cv.clientHeight;
+      cv.width = W * dpr; cv.height = H * dpr;
+      fc.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cols = Math.ceil(W / PX) + 2; rows = Math.ceil(H / PY) + 1;
+      color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || color;
+      // pre-render the 16 hex glyphs once; drawImage is far cheaper than fillText per glyph
+      atlas = [...'0123456789abcdef'].map(chr => {
+        const g = document.createElement('canvas'); g.width = GW * dpr; g.height = GH * dpr;
+        const gc = g.getContext('2d'); gc.setTransform(dpr, 0, 0, dpr, 0, 0);
+        gc.font = '700 ' + FONT + 'px "JetBrains Mono", ui-monospace, Menlo, monospace';
+        gc.textBaseline = 'top'; gc.fillStyle = color; gc.fillText(chr, 0, 0);
+        return g;
+      });
+    }
+    function draw(t) {
+      fc.clearRect(0, 0, W, H);
+      for (let r = 0; r < rows; r++) {
+        const speed = (r % 2 ? -1 : 1) * (6 + (r * 7) % 9);    // px/s, alternating direction per row
+        const off = (t / 1000) * speed;
+        const base = Math.floor(off / PX);
+        const frac = off - base * PX;
+        const y = r * PY;
+        for (let c = -1; c < cols; c++) {
+          const gi = c + base;                                   // glyph index: travels with the glyph
+          const x = c * PX - frac;
+          const f = density(x + GW / 2, y + GH / 2);
+          if (f <= 0 || hash(r, gi) > f) continue;               // fewer glyphs as density drops
+          fc.globalAlpha = Math.min(1, .3 + f);
+          const idx = ((r * 131 + gi) % GENESIS_RAW.length + GENESIS_RAW.length) % GENESIS_RAW.length;
+          fc.drawImage(atlas[parseInt(GENESIS_RAW[idx], 16)], x, y, GW, GH);
+        }
+      }
+      fc.globalAlpha = 1;
+    }
+    function frame(t) {
+      if (!running) return;
+      if (t - last > 33) { last = t; draw(t); }
+      requestAnimationFrame(frame);
+    }
+    function start() { if (running) return; running = true; size(); requestAnimationFrame(frame); }
+    function stop() { running = false; }
+    window.addEventListener('resize', size);
+    if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', size);
+    document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(size);
+    start();
+  })();
   document.getElementById('addExpenseBtn').addEventListener('click', () => {
     document.getElementById('expDate').value = new Date().toISOString().slice(0,10);
     document.getElementById('expAmount').value = ''; document.getElementById('expNote').value = '';
