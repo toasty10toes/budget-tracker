@@ -219,9 +219,9 @@
       <div class="income-input-wrap"><span>$</span><input type="number" inputmode="decimal" id="incomeInput" placeholder="0"></div>
     </div>
     <div class="summary-line"><div class="label">Necessities budgeted</div><div id="necessitiesBudgetTotal">$0</div></div>
-    <div class="summary-line total"><div class="label">Remainder (after necessities)</div><div id="remainderValue">$0</div></div>
+    <div class="summary-line total"><div class="label">After necessities</div><div id="afterNecessities">$0</div></div>
     <div class="summary-line"><div class="label">Savings & investments budgeted</div><div id="savingsBudgetTotal">$0</div></div>
-    <div class="summary-line total"><div class="label">Left after savings</div><div id="leftAfterSavings">$0</div></div>
+    <div class="summary-line total"><div class="label">Remainder</div><div id="remainderStart">$0</div></div>
   </div>
 
     <div id="curtainTab"></div>
@@ -510,6 +510,7 @@
       </div>`;
     const card = wrap.querySelector('[data-swipe-target]');
     attachSwipe(card, () => {
+      state.expenses.forEach(e => { if (e.categoryId === cat.id) e.categoryId = REMAINDER_ID; });
       state.categories = state.categories.filter(c => c.id !== cat.id); saveState(); render();
     });
     card.addEventListener('click', () => { if (card.style.transform === '' || card.style.transform === 'translateX(0px)') openCategoryEditor(cat); });
@@ -521,7 +522,7 @@
     const spentFor = cat => state.expenses.filter(e => e.categoryId === cat.id).reduce((s,e) => s + e.amount, 0);
 
     // Remainder = income − every budget − expenses logged to Remainder − any category overspend
-    const income = parseFloat(state.income) || 0;
+    const income = parseFloat(state.income) || 0, hasIncome = income > 0;
     const totalBudget = state.categories.reduce((s, c) => s + c.budget, 0);
     const remainderBudget = income - totalBudget;
     const overspend = state.categories.reduce((s, c) => s + Math.max(0, spentFor(c) - c.budget), 0);
@@ -530,21 +531,22 @@
     // Reminder grid
     const grid = document.getElementById('reminderGrid');
     grid.innerHTML = '';
-    const addReminder = (name, dotColor, budget, spent) => {
+    const addReminder = (name, dotColor, budget, spent, ready = true) => {
       const remaining = budget - spent;
-      const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+      const pct = ready && budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
       const color = remaining < 0 ? 'var(--danger)' : pct > 85 ? 'var(--warn)' : dotColor;
+      const amount = ready ? fmt(remaining) : 'Set income';
       const item = document.createElement('div');
       item.className = 'reminder-item';
       item.innerHTML = `
         <div class="reminder-row">
           <div class="reminder-name"><span class="cat-dot" style="background:${dotColor}"></span>${escapeHtml(name)}</div>
-          <div class="reminder-left" style="color:${remaining < 0 ? 'var(--danger)' : 'var(--text)'}">${fmt(remaining)}</div>
+          <div class="reminder-left" style="color:${ready && remaining < 0 ? 'var(--danger)' : ready ? 'var(--text)' : 'var(--text-dim)'}">${amount}</div>
         </div>
         <div class="reminder-bar"><div style="width:${pct}%; background:${color}"></div></div>`;
       grid.appendChild(item);
     };
-    addReminder('Remainder', 'var(--accent)', remainderBudget, remainderSpent);
+    addReminder('Remainder', 'var(--accent)', remainderBudget, remainderSpent, hasIncome);
     const pinnedCats = state.categories.filter(c => c.pinned);
     document.getElementById('noReminder').style.display = pinnedCats.length ? 'none' : 'block';
     pinnedCats.forEach(cat => addReminder(cat.name, cat.color, cat.budget, spentFor(cat)));
@@ -561,17 +563,16 @@
     savings.forEach(cat => { savingsBudget += cat.budget; sl.appendChild(renderCategoryCard(cat, spentFor(cat))); });
 
     // Plan summary
-    const remainder = income - necessitiesBudget;
-    const leftAfter = remainder - savingsBudget;
+    const afterNec = income - necessitiesBudget;
     document.getElementById('necessitiesBudgetTotal').textContent = fmt(necessitiesBudget);
     document.getElementById('savingsBudgetTotal').textContent = fmt(savingsBudget);
-    const remEl = document.getElementById('remainderValue'); remEl.textContent = fmt(remainder); remEl.classList.toggle('negative', remainder < 0);
-    const leftEl = document.getElementById('leftAfterSavings'); leftEl.textContent = fmt(leftAfter); leftEl.classList.toggle('negative', leftAfter < 0);
+    const afterEl = document.getElementById('afterNecessities'); afterEl.textContent = hasIncome ? fmt(afterNec) : 'Set income'; afterEl.classList.toggle('negative', hasIncome && afterNec < 0);
+    const startEl = document.getElementById('remainderStart'); startEl.textContent = hasIncome ? fmt(remainderBudget) : 'Set income'; startEl.classList.toggle('negative', hasIncome && remainderBudget < 0);
 
     // Expenses
     const expList = document.getElementById('expenseList');
     expList.innerHTML = '';
-    const sorted = [...state.expenses].sort((a,b) => b.date.localeCompare(a.date));
+    const sorted = [...state.expenses].sort((a,b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
     document.getElementById('noExpenses').style.display = sorted.length ? 'none' : 'block';
     sorted.forEach(e => {
       const cat = state.categories.find(c => c.id === e.categoryId);
