@@ -112,16 +112,16 @@
   .fab-wrap {
     position: fixed; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translate3d(-50%, 0, 0);
     width: 232px; height: 84px; z-index: 60; cursor: pointer; -webkit-user-select: none; user-select: none;
-    will-change: transform; -webkit-backface-visibility: hidden; backface-visibility: hidden; /* own compositor layer: keeps iOS from re-rasterizing it during scroll */
   }
   .fab-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none;
-    will-change: transform; transition: transform .18s cubic-bezier(.2,.8,.2,1), opacity .18s ease; }
+    opacity: 0; transition: transform .18s cubic-bezier(.2,.8,.2,1), opacity .35s ease; }
+  .fab-canvas.ready { opacity: 1; }
   .fab-label {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: white; font-size: 15px; font-weight: 700; pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.25);
     transition: transform .18s cubic-bezier(.2,.8,.2,1);
   }
-  .fab-wrap:active .fab-canvas { transform: scale(.96); opacity: .85; }
+  .fab-wrap:active .fab-canvas.ready { transform: scale(.96); opacity: .85; }
   .fab-wrap:active .fab-label { transform: scale(.96); }
 
   /* clock flicker */
@@ -669,13 +669,14 @@
 
   // add button: no pill, just genesis hex. Dense enough in the middle to read as solid,
   // thinning out with distance from a pill-shaped core so the edge is a density gradient.
-  (function() {
+  // Drawn once (static bitmap = no iOS scroll repaint issues); re-rolled on each press.
+  const fabRedraw = (function() {
     const cv = document.getElementById('fabCanvas'), fc = cv.getContext('2d');
-    const PX = 2.6, PY = 3, FONT = 7;          // glyph pitch is tighter than the glyphs, so the core overlaps into a solid
+    const PX = 2.6, PY = 3, FONT = 7;            // glyph pitch is tighter than the glyphs, so the core overlaps into a solid
     const CORE_W = 90, CORE_H = 19, FADE = 26;   // half-size of the solid core, and how far the falloff runs
     const GW = 5, GH = 8;                        // drawn glyph box
-    let W = 0, H = 0, cols = 0, rows = 0, color = '#2563eb', last = 0, running = false, atlas = [], scrollTimer = null, scrolling = false;
-    const hash = (a, b) => { let h = (a * 374761393 + b * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+    let W = 0, H = 0, seed = 1, fontReady = false;
+    const hash = (a, b) => { let h = (a * 374761393 + b * 668265263 + seed * 97) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
     function density(x, y) {
       const dx = Math.max(Math.abs(x - W / 2) - (CORE_W - CORE_H), 0), dy = Math.abs(y - H / 2);
       const d = Math.hypot(dx, dy) - CORE_H;       // signed distance to the rounded core
@@ -683,61 +684,47 @@
       const t = 1 - d / FADE;
       return t <= 0 ? 0 : t * t;                   // ease-in so the edge dissolves gently
     }
-    function size() {
+    function draw() {
+      if (!fontReady) return;
       const dpr = window.devicePixelRatio || 1;
       W = cv.clientWidth; H = cv.clientHeight;
+      if (!W || !H) return;
       cv.width = W * dpr; cv.height = H * dpr;
       fc.setTransform(dpr, 0, 0, dpr, 0, 0);
-      cols = Math.ceil(W / PX) + 2; rows = Math.ceil(H / PY) + 1;
-      color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || color;
-      // pre-render the 16 hex glyphs once; drawImage is far cheaper than fillText per glyph
-      atlas = [...'0123456789abcdef'].map(chr => {
+      const color = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2563eb';
+      const atlas = [...'0123456789abcdef'].map(chr => {
         const g = document.createElement('canvas'); g.width = GW * dpr; g.height = GH * dpr;
         const gc = g.getContext('2d'); gc.setTransform(dpr, 0, 0, dpr, 0, 0);
         gc.font = '700 ' + FONT + 'px "JetBrains Mono", ui-monospace, Menlo, monospace';
         gc.textBaseline = 'top'; gc.fillStyle = color; gc.fillText(chr, 0, 0);
         return g;
       });
-    }
-    function draw(t) {
+      const cols = Math.ceil(W / PX) + 1, rows = Math.ceil(H / PY) + 1, off = seed * 53;
       fc.clearRect(0, 0, W, H);
       for (let r = 0; r < rows; r++) {
-        const speed = (r % 2 ? -1 : 1) * (6 + (r * 7) % 9);    // px/s, alternating direction per row
-        const off = (t / 1000) * speed;
-        const base = Math.floor(off / PX);
-        const frac = off - base * PX;
         const y = r * PY;
-        for (let c = -1; c < cols; c++) {
-          const gi = c + base;                                   // glyph index: travels with the glyph
-          const x = c * PX - frac;
+        for (let c = 0; c < cols; c++) {
+          const x = c * PX;
           const f = density(x + GW / 2, y + GH / 2);
-          if (f <= 0 || hash(r, gi) > f) continue;               // fewer glyphs as density drops
+          if (f <= 0 || hash(r, c) > f) continue;               // fewer glyphs as density drops
           fc.globalAlpha = Math.min(1, .3 + f);
-          const idx = ((r * 131 + gi) % GENESIS_RAW.length + GENESIS_RAW.length) % GENESIS_RAW.length;
-          fc.drawImage(atlas[parseInt(GENESIS_RAW[idx], 16)], x, y, GW, GH);
+          fc.drawImage(atlas[parseInt(GENESIS_RAW[(r * 131 + c + off) % GENESIS_RAW.length], 16)], x, y, GW, GH);
         }
       }
       fc.globalAlpha = 1;
+      cv.classList.add('ready');
     }
-    function frame(t) {
-      if (!running) return;
-      if (!scrolling && t - last > 33) { last = t; draw(t); }
-      requestAnimationFrame(frame);
-    }
-    function start() { if (running) return; running = true; size(); requestAnimationFrame(frame); }
-    function stop() { running = false; }
-    window.addEventListener('resize', size);
-    if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', size);
-    document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
-    // hold the frame while scrolling; redrawing a fixed canvas mid-scroll flickers on iOS Safari
-    window.addEventListener('scroll', () => {
-      scrolling = true; clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(() => { scrolling = false; }, 120);
-    }, { passive: true });
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(size);
-    start();
+    const reroll = () => { seed++; draw(); };
+    window.addEventListener('resize', draw);
+    if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+    // wait for JetBrains Mono so the first paint is the final one (no font-swap flicker); fall back after 2s
+    const go = () => { if (fontReady) return; fontReady = true; draw(); };
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(go);
+    setTimeout(go, 2000);
+    return reroll;
   })();
   document.getElementById('addExpenseBtn').addEventListener('click', () => {
+    fabRedraw();
     document.getElementById('expDate').value = new Date().toISOString().slice(0,10);
     document.getElementById('expAmount').value = ''; document.getElementById('expNote').value = '';
     openModal('expenseModal');
