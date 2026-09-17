@@ -6,12 +6,11 @@
 <title>Budget Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #f7f7f8; --card: #ffffff; --text: #1a1a1a; --text-dim: #6b6b6b; --border: #e5e5e7;
     --accent: #2563eb; --danger: #dc2626; --warn: #d97706; --good: #16a34a; --radius: 14px;
-    --liquid-a: #3b82f6; --liquid-b: #06b6d4; --liquid-c: #8b5cf6; --liquid-bg: #0b1a33;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -32,7 +31,7 @@
   }
   header {
     padding: 18px 16px 14px; position: sticky; top: 0; background: var(--bg);
-    z-index: 10; border-bottom: 1px solid var(--border); text-align: center; position: sticky;
+    z-index: 10; border-bottom: 1px solid var(--border); text-align: center;
   }
   h1 { font-size: 17px; margin: 0 0 4px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
   .month-label {
@@ -163,11 +162,6 @@
   }
   #privateZone.open #curtainTab { display: flex; }
   #curtainTab::after { content: "⋮"; }
-  .curtain-hint {
-    position: absolute; top: 14px; left: 0; right: 0; text-align: center;
-    font-size: 11px; color: var(--text-dim); font-family: ui-monospace, Menlo, monospace; letter-spacing: .08em;
-    pointer-events: none;
-  }
   /* Modals */
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: flex-end; justify-content: center; }
   .modal-overlay.open { display: flex; }
@@ -187,7 +181,6 @@
   .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; }
   .swatch.selected { border-color: var(--text); }
   .close-x { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--text-dim); font-size: 20px; }
-  .hint { font-size: 11.5px; color: var(--text-dim); margin-top: 6px; text-align: center; }
 </style>
 </head>
 <body>
@@ -200,10 +193,10 @@
 
 <main>
   <!-- Quick reminder box -->
-  <div class="card" id="reminderCard">
+  <div class="card">
     <div class="card-title">What's left</div>
     <div class="reminder-grid" id="reminderGrid"></div>
-    <div class="empty-state" id="noReminder" style="display:none; padding: 10px;">Tap a category and turn on "Show in What's left" to pin it here.</div>
+    <div class="empty-state" id="noReminder" style="display:none; padding: 10px;">Tap a category and turn on "Show in What's left" to pin it under Remainder.</div>
   </div>
 
   <div id="privateZone">
@@ -220,7 +213,7 @@
   <div class="empty-state" id="noExpenses" style="display:none;">No expenses logged this month yet.</div>
 
   <div class="section-title">Monthly plan</div>
-  <div class="card" id="planCard">
+  <div class="card">
     <div class="income-row">
       <label>Monthly income</label>
       <div class="income-input-wrap"><span>$</span><input type="number" inputmode="decimal" id="incomeInput" placeholder="0"></div>
@@ -302,7 +295,7 @@
   const STORAGE_KEY = 'budget_tracker_data_v2';
   const PRIVACY_KEY = 'budget_tracker_private';
   const SWIPE_THRESHOLD = -60, SWIPE_MAX = -88;
-  const CURTAIN_WORDS = ['shh', 'nunya', 'private', '$$$', 'top secret', 'mind ur biz', 'nope', 'hidden', 'peek?', 'budget', '🤫', 'later', 'classified', 'no thx', 'eyes off', 'tap to peek'];
+  const REMAINDER_ID = 'remainder';
 
   let state = { categories: [], expenses: [], income: {} };
   let selectedColor = COLORS[0], selectedGroup = 'necessity', editingId = null;
@@ -342,10 +335,19 @@
     }
     if (!state.seededPins) {
       const have = new Set(state.categories.map(c => c.name.toLowerCase()));
-      if (!have.has('spending')) state.categories.push({ id: 'c' + Date.now() + '_sp', name: 'Spending', budget: 0, color: COLORS[6], group: 'necessity' });
-      const pinned = new Set(['groceries', 'gas', 'spending']);
+      const pinned = new Set(['groceries', 'gas']);
       state.categories.forEach(c => { c.pinned = pinned.has(c.name.toLowerCase()); });
       state.seededPins = true;
+      saveState();
+    }
+    if (!state.spendingRemoved) {
+      // "Spending" is now the Remainder row; move its expenses there and drop the category
+      const sp = state.categories.find(c => c.name.toLowerCase() === 'spending');
+      if (sp) {
+        state.expenses.forEach(e => { if (e.categoryId === sp.id) e.categoryId = REMAINDER_ID; });
+        state.categories = state.categories.filter(c => c !== sp);
+      }
+      state.spendingRemoved = true;
       saveState();
     }
   }
@@ -358,13 +360,13 @@
   const curtain = document.getElementById('curtain');
   const canvas = document.getElementById('curtainCanvas');
   const ctx = canvas.getContext('2d');
-  const HEX = '0123456789abcdef', B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const HEX = '0123456789abcdef';
   const BLUE = '#3b82f6';
   let grid = [], glow = [], cols = 0, rows = 0, cw = 0, ch = 0, curtainOpen = false, timer = null;
-  let bgColor = '#050506', textColor = '#ffffff', textAlpha = .16;
+  let textColor = '#ffffff', textAlpha = .16;
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
-    bgColor = cs.getPropertyValue('--bg').trim() || '#050506';
+    const bgColor = cs.getPropertyValue('--bg').trim() || '#050506';
     textColor = cs.getPropertyValue('--text').trim() || '#ffffff';
     // lighter page needs slightly stronger ink to stay legible
     const isLight = /^#f/i.test(bgColor);
@@ -449,8 +451,8 @@
   }
   function startCanvas() { if (timer) return; sizeCanvas(); drawCanvas(); timer = setInterval(tick, 110); }
   function stopCanvas() { if (timer) { clearInterval(timer); timer = null; } }
-  window.addEventListener('resize', () => { if (timer) { sizeCanvas(); drawCanvas(); } });
-  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (timer) { sizeCanvas(); drawCanvas(); } });
+  window.addEventListener('resize', refitCanvas);
+  if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', refitCanvas);
 
   // drag the curtain (or its tab)
   (function() {
@@ -516,28 +518,36 @@
 
   function render() {
     document.getElementById('incomeInput').value = state.income || '';
-    const monthExpenses = state.expenses;
-    const spentFor = cat => monthExpenses.filter(e => e.categoryId === cat.id).reduce((s,e) => s + e.amount, 0);
+    const spentFor = cat => state.expenses.filter(e => e.categoryId === cat.id).reduce((s,e) => s + e.amount, 0);
+
+    // Remainder = income − every budget − expenses logged to Remainder − any category overspend
+    const income = parseFloat(state.income) || 0;
+    const totalBudget = state.categories.reduce((s, c) => s + c.budget, 0);
+    const remainderBudget = income - totalBudget;
+    const overspend = state.categories.reduce((s, c) => s + Math.max(0, spentFor(c) - c.budget), 0);
+    const remainderSpent = state.expenses.filter(e => e.categoryId === REMAINDER_ID).reduce((s, e) => s + e.amount, 0) + overspend;
 
     // Reminder grid
     const grid = document.getElementById('reminderGrid');
     grid.innerHTML = '';
-    const pinnedCats = state.categories.filter(c => c.pinned);
-    document.getElementById('noReminder').style.display = pinnedCats.length ? 'none' : 'block';
-    pinnedCats.forEach(cat => {
-      const spent = spentFor(cat), remaining = cat.budget - spent;
-      const pct = cat.budget > 0 ? Math.min(100, (spent / cat.budget) * 100) : 0;
-      const color = remaining < 0 ? 'var(--danger)' : pct > 85 ? 'var(--warn)' : cat.color;
+    const addReminder = (name, dotColor, budget, spent) => {
+      const remaining = budget - spent;
+      const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+      const color = remaining < 0 ? 'var(--danger)' : pct > 85 ? 'var(--warn)' : dotColor;
       const item = document.createElement('div');
       item.className = 'reminder-item';
       item.innerHTML = `
         <div class="reminder-row">
-          <div class="reminder-name"><span class="cat-dot" style="background:${cat.color}"></span>${escapeHtml(cat.name)}</div>
+          <div class="reminder-name"><span class="cat-dot" style="background:${dotColor}"></span>${escapeHtml(name)}</div>
           <div class="reminder-left" style="color:${remaining < 0 ? 'var(--danger)' : 'var(--text)'}">${fmt(remaining)}</div>
         </div>
         <div class="reminder-bar"><div style="width:${pct}%; background:${color}"></div></div>`;
       grid.appendChild(item);
-    });
+    };
+    addReminder('Remainder', 'var(--accent)', remainderBudget, remainderSpent);
+    const pinnedCats = state.categories.filter(c => c.pinned);
+    document.getElementById('noReminder').style.display = pinnedCats.length ? 'none' : 'block';
+    pinnedCats.forEach(cat => addReminder(cat.name, cat.color, cat.budget, spentFor(cat)));
 
     // Category lists
     const necessities = state.categories.filter(c => c.group !== 'savings');
@@ -551,7 +561,6 @@
     savings.forEach(cat => { savingsBudget += cat.budget; sl.appendChild(renderCategoryCard(cat, spentFor(cat))); });
 
     // Plan summary
-    const income = parseFloat(state.income) || 0;
     const remainder = income - necessitiesBudget;
     const leftAfter = remainder - savingsBudget;
     document.getElementById('necessitiesBudgetTotal').textContent = fmt(necessitiesBudget);
@@ -562,10 +571,11 @@
     // Expenses
     const expList = document.getElementById('expenseList');
     expList.innerHTML = '';
-    const sorted = [...monthExpenses].sort((a,b) => b.date.localeCompare(a.date));
+    const sorted = [...state.expenses].sort((a,b) => b.date.localeCompare(a.date));
     document.getElementById('noExpenses').style.display = sorted.length ? 'none' : 'block';
     sorted.forEach(e => {
       const cat = state.categories.find(c => c.id === e.categoryId);
+      const catName = e.categoryId === REMAINDER_ID ? 'Remainder' : cat ? cat.name : 'Uncategorized';
       const dateStr = new Date(e.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const wrap = document.createElement('div');
       wrap.className = 'swipe-wrap';
@@ -573,7 +583,7 @@
         <div class="swipe-delete-bg">Delete</div>
         <div class="expense-item" data-swipe-target>
           <div class="expense-left">
-            <div>${cat ? escapeHtml(cat.name) : 'Uncategorized'} · <span class="expense-note">${dateStr}</span></div>
+            <div>${escapeHtml(catName)} · <span class="expense-note">${dateStr}</span></div>
             ${e.note ? `<div class="expense-note">${escapeHtml(e.note)}</div>` : ''}
           </div>
           <div class="expense-amt">${fmt(e.amount)}</div>
@@ -587,8 +597,8 @@
     // Category select
     const sel = document.getElementById('expCategory');
     sel.innerHTML = '';
-    if (!state.categories.length) { const o = document.createElement('option'); o.textContent = 'Add a category first'; o.value = ''; sel.appendChild(o); }
-    else state.categories.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); });
+    const remOpt = document.createElement('option'); remOpt.value = REMAINDER_ID; remOpt.textContent = 'Remainder'; sel.appendChild(remOpt);
+    state.categories.forEach(c => { const o = document.createElement('option'); o.value = c.id; o.textContent = c.name; sel.appendChild(o); });
     requestAnimationFrame(refitCanvas);
   }
 
@@ -717,7 +727,7 @@
   loadState();
   render();
   setPrivate(isPrivate(), false);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (timer) { sizeCanvas(); drawCanvas(); } });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(refitCanvas);
 })();
 </script>
 </body>
